@@ -14,16 +14,18 @@ import (
 )
 
 const (
-	saltSize = 16
-	keySize  = 32
+	saltSize   = 16
+	keySize    = 32
+	masterFile = "master.key" // File where the master key is encrypted
+	vaultFile  = "vault.enc"  // File where encrypted passwords are stored
 )
 
-// Generate password using argon2
+// Generate a key using Argon2
 func GenerateKey(password string, salt []byte) []byte {
 	return argon2.IDKey([]byte(password), salt, 1, 64*1024, 4, keySize)
 }
 
-// Encrypt with ARS-GCM
+// Encrypt text using AES-GCM
 func Encrypt(text, password string) (string, error) {
 	salt := make([]byte, saltSize)
 
@@ -54,7 +56,6 @@ func Encrypt(text, password string) (string, error) {
 // Decrypt AES-GCM encrypted text
 func Decrypt(encryptedText, password string) (string, error) {
 	data, err := base64.StdEncoding.DecodeString(encryptedText)
-
 	if err != nil {
 		return "", err
 	}
@@ -64,13 +65,11 @@ func Decrypt(encryptedText, password string) (string, error) {
 
 	key := GenerateKey(password, salt)
 	block, err := aes.NewCipher(key)
-
 	if err != nil {
 		return "", err
 	}
 
 	aesGCM, err := cipher.NewGCM(block)
-
 	if err != nil {
 		return "", err
 	}
@@ -79,7 +78,6 @@ func Decrypt(encryptedText, password string) (string, error) {
 	nonce, cipherText := cipherText[:nonceSize], cipherText[nonceSize:]
 
 	plainText, err := aesGCM.Open(nil, nonce, cipherText, nil)
-
 	if err != nil {
 		return "", err
 	}
@@ -87,68 +85,105 @@ func Decrypt(encryptedText, password string) (string, error) {
 	return string(plainText), nil
 }
 
-// Save password
-func SavePassword(filename, password, masterKey string) {
-	encrypted, err := Encrypt(password, masterKey)
+// Save the master key securely
+func SaveMasterKey(password string) {
+	var masterPassword string
+	fmt.Print("Set a master password: ")
+	fmt.Scanln(&masterPassword)
 
+	encryptedMaster, err := Encrypt(masterPassword, password)
 	if err != nil {
-		fmt.Println("Error encrypting:", err)
+		fmt.Println("Error encrypting master key:", err)
 		return
 	}
 
-	f, _ := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	defer f.Close()
-
-	f.WriteString(encrypted + "\n")
-	fmt.Println("Password saved successfully!")
+	os.WriteFile(masterFile, []byte(encryptedMaster), 0600)
+	fmt.Println("Master password saved securely!")
 }
 
-// Load passwords
-func LoadPasswords(filename, masterKey string) {
-	data, err := os.ReadFile(filename)
-
+// Load the master key
+func LoadMasterKey(password string) (string, error) {
+	data, err := os.ReadFile(masterFile)
 	if err != nil {
-		fmt.Println("No saved passwords.")
+		return "", fmt.Errorf("no master key found, run 'init' first")
+	}
+
+	return Decrypt(string(data), password)
+}
+
+// Save encrypted password
+func SavePassword(masterPassword, newPassword string) {
+	encrypted, err := Encrypt(newPassword, masterPassword)
+	if err != nil {
+		fmt.Println("Error encrypting password:", err)
+		return
+	}
+
+	f, _ := os.OpenFile(vaultFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	defer f.Close()
+	f.WriteString(encrypted + "\n")
+	fmt.Println("Password saved securely!")
+}
+
+// Load and decrypt stored passwords
+func LoadPasswords(masterPassword string) {
+	data, err := os.ReadFile(vaultFile)
+	if err != nil {
+		fmt.Println("No saved passwords yet.")
 		return
 	}
 
 	lines := strings.Split(string(data), "\n")
-
 	for _, line := range lines {
 		if len(line) > 0 {
-			decrypted, err := Decrypt(line, masterKey)
+			decrypted, err := Decrypt(line, masterPassword)
 			if err != nil {
 				fmt.Println("Error decrypting:", err)
 				continue
 			}
-
 			fmt.Println("Password:", decrypted)
 		}
 	}
 }
 
-// Main function
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: go run main.go <command>")
-		fmt.Println("Commands: save <password> | load")
+		fmt.Println("Commands: init | save <password> | load")
 		return
 	}
 
-	masterKey := "super-secure-master-key" // Set with user imput
-	filename := "vault.enc"
+	var systemPassword string
+	fmt.Print("Enter system password: ")
+	fmt.Scanln(&systemPassword)
 
 	switch os.Args[1] {
+
+	case "init":
+		SaveMasterKey(systemPassword)
+
 	case "save":
+		masterKey, err := LoadMasterKey(systemPassword)
+
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
 		if len(os.Args) < 3 {
 			fmt.Println("Usage: save <password>")
 			return
 		}
-
-		SavePassword(filename, os.Args[2], masterKey)
+		SavePassword(masterKey, os.Args[2])
 
 	case "load":
-		LoadPasswords(filename, masterKey)
+		masterKey, err := LoadMasterKey(systemPassword)
+
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		LoadPasswords(masterKey)
 
 	default:
 		fmt.Println("Unknown command")
