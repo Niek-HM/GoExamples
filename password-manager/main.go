@@ -5,7 +5,10 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
+	"fmt"
 	"io"
+	"os"
+	"strings"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -82,4 +85,72 @@ func Decrypt(encryptedText, password string) (string, error) {
 	}
 
 	return string(plainText), nil
+}
+
+// Save password
+func SavePassword(filename, password, masterKey string) {
+	encrypted, err := Encrypt(password, masterKey)
+
+	if err != nil {
+		fmt.Println("Error encrypting:", err)
+		return
+	}
+
+	f, _ := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	defer f.Close()
+
+	f.WriteString(encrypted + "\n")
+	fmt.Println("Password saved successfully!")
+}
+
+// Load passwords
+func LoadPasswords(filename, masterKey string) {
+	data, err := os.ReadFile(filename)
+
+	if err != nil {
+		fmt.Println("No saved passwords.")
+		return
+	}
+
+	lines := strings.Split(string(data), "\n")
+
+	for _, line := range lines {
+		if len(line) > 0 {
+			decrypted, err := Decrypt(line, masterKey)
+			if err != nil {
+				fmt.Println("Error decrypting:", err)
+				continue
+			}
+
+			fmt.Println("Password:", decrypted)
+		}
+	}
+}
+
+// Main function
+func main() {
+	if len(os.Args) < 2 {
+		fmt.Println("Usage: go run main.go <command>")
+		fmt.Println("Commands: save <password> | load")
+		return
+	}
+
+	masterKey := "super-secure-master-key" // Set with user imput
+	filename := "vault.enc"
+
+	switch os.Args[1] {
+	case "save":
+		if len(os.Args) < 3 {
+			fmt.Println("Usage: save <password>")
+			return
+		}
+
+		SavePassword(filename, os.Args[2], masterKey)
+
+	case "load":
+		LoadPasswords(filename, masterKey)
+
+	default:
+		fmt.Println("Unknown command")
+	}
 }
