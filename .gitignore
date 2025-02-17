@@ -1,0 +1,21 @@
+# Ignore Visual Studio Code settings and workspace files
+.vscode/
+.vscode/*
+
+# Ignore Go build artifacts
+bin/
+pkg/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Ignore Go test binaries
+*.test
+
+# Ignore Go dependency directories
+vendor/
+
+# Ignore Go module files
+go.sum
